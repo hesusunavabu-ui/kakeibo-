@@ -111,15 +111,15 @@
 <div id="setupScreen" class="hidden">
   <div class="box">
     <h2>🔗 ふたりで共有する設定</h2>
-    <p class="desc">Googleスプレッドシートに記録を保存して共有します。付属の手順書に沿って進めてください。<br>この設定は<b>夫婦それぞれの端末で1回ずつ</b>行います（同じ内容を入力すればつながります）。</p>
+    <p class="desc">ふたりで同じ「合言葉」を入れると、同じデータを共有できます。<br>この設定は<b>各端末で最初の1回だけ</b>です（次回からは暗証番号だけで開けます）。</p>
     <div class="card">
-      <div class="row">
+      <div class="row" id="urlRow">
         <label class="fld">① ウェブアプリのURL</label>
         <textarea id="urlInput" placeholder="https://script.google.com/macros/s/××××/exec を貼り付け" autocapitalize="off" autocorrect="off"></textarea>
         <div class="step-note">手順書に従い、Apps Scriptの「デプロイ」で発行されたURL（末尾が /exec）を貼り付けます。</div>
       </div>
       <div class="row">
-        <label class="fld">② ふたりの合言葉（ペアコード）</label>
+        <label class="fld">ふたりの合言葉（ペアコード）</label>
         <input id="roomInput" type="text" placeholder="例：miyajima-2026-himitsu" autocapitalize="off" autocorrect="off">
         <div class="step-note">夫婦で同じ言葉を決めて、両方の端末で同じものを入力します。他人に推測されにくい長めの言葉に。</div>
       </div>
@@ -211,6 +211,8 @@ const $=id=>document.getElementById(id);
 
 /* ===================== 保存キー ===================== */
 const PKEY='futari_pin_v1', URLKEY='futari_gs_url_v1', ROOMKEY='futari_room_v1';
+/* ↓ あらかじめ組み込んだ接続先URL。これがあると、利用者は合言葉だけ入れればつながります。 */
+const DEFAULT_API_URL="https://script.google.com/macros/s/AKfycbwQuPG4nvIaRYYeSr7oyWceA-pJKqgnwPtdgwX_HCuFVs2xmCB9TXuKzfyOvKTv7uhMBw/exec";
 
 /* ===================== 状態 ===================== */
 let records=[], names={h:'夫',w:'妻'};
@@ -394,7 +396,7 @@ function showSetup(){$('setupScreen').classList.remove('hidden');document.body.s
 function hideSetup(){$('setupScreen').classList.add('hidden');document.body.style.overflow='';}
 $('reconfigBtn').addEventListener('click',()=>{$('urlInput').value=localStorage.getItem(URLKEY)||'';$('roomInput').value=localStorage.getItem(ROOMKEY)||'';showSetup();});
 $('connectBtn').addEventListener('click',()=>{
-  const u=$('urlInput').value.trim();
+  const u=($('urlInput').value.trim()||DEFAULT_API_URL);
   const rm=$('roomInput').value.trim().replace(/[^0-9A-Za-z\-_一-龠ぁ-んァ-ヶ]/g,'-');
   if(!/^https:\/\/script\.google\.com\/macros\/.+\/exec$/.test(u)){$('setupStatus').textContent='⚠ URLは https://script.google.com/macros/… で始まり /exec で終わります';return;}
   if(rm.length<4){$('setupStatus').textContent='⚠ 合言葉は4文字以上にしてください';return;}
@@ -403,7 +405,7 @@ $('connectBtn').addEventListener('click',()=>{
   connect(true);
 });
 function connect(fromSetup){
-  apiUrl=localStorage.getItem(URLKEY)||'';room=localStorage.getItem(ROOMKEY)||'';
+  apiUrl=localStorage.getItem(URLKEY)||DEFAULT_API_URL;room=localStorage.getItem(ROOMKEY)||'';
   if(!apiUrl||!room){showSetup();return;}
   pendingSetup=fromSetup;setStatus('接続中…',false);
   reload();
@@ -414,9 +416,11 @@ function connect(fromSetup){
 /* ===================== 起動 ===================== */
 function afterUnlock(){
   applyNames();
-  if(!localStorage.getItem(URLKEY)||!localStorage.getItem(ROOMKEY))showSetup();
+  if(!localStorage.getItem(ROOMKEY))showSetup();
   else connect(false);
 }
+/* URLをあらかじめ組み込んでいる場合は、設定画面のURL欄を隠して合言葉だけにする */
+if(DEFAULT_API_URL){ $('urlInput').value=DEFAULT_API_URL; if($('urlRow'))$('urlRow').style.display='none'; }
 function boot(){applyNames();if(!getPin())showLock('set');else showLock('enter');}
 boot();
 </script>
