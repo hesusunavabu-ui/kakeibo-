@@ -53,6 +53,11 @@
   .item .info .sub{font-size:12px;color:var(--sub);margin-top:2px}
   .item .amt{font-size:16px;font-weight:800;white-space:nowrap}
   .del{background:none;border:none;color:#c9ced8;font-size:20px;cursor:pointer;padding:4px}
+  .edit{background:none;border:none;color:#9aa3b2;font-size:17px;cursor:pointer;padding:4px}
+  #editModal{position:fixed;inset:0;z-index:110;background:rgba(20,28,50,.45);display:flex;align-items:center;justify-content:center;padding:20px}
+  #editModal.hidden{display:none}
+  #editModal .ed-card{background:#fff;border-radius:18px;padding:20px;width:100%;max-width:420px;box-shadow:0 12px 44px rgba(0,0,0,.28)}
+  #editModal .ed-card h2{margin:0 0 14px;font-size:16px;font-weight:700}
   .empty{text-align:center;color:var(--sub);padding:30px 10px;font-size:14px}
   .ratiosel{margin-top:7px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#fbfcfe;color:var(--text);max-width:190px;font-family:inherit}
   .pending-note{background:#fff6e8;border:1px solid #f3d59b;color:#96631a;border-radius:12px;padding:12px 14px;font-size:12.5px;line-height:1.6;margin-top:12px}
@@ -202,6 +207,24 @@
   </div>
 </section>
 
+<!-- ============ 編集モーダル ============ -->
+<div id="editModal" class="hidden">
+  <div class="ed-card">
+    <h2>記録を編集</h2>
+    <div class="row"><label class="fld">メモ</label><input id="edMemo" type="text" placeholder="スーパー、外食 など"></div>
+    <div class="row"><label class="fld">日付</label><input id="edDate" type="date"></div>
+    <div class="row"><label class="fld">支払った人</label>
+      <div class="seg" id="edWho">
+        <button type="button" data-who="h" id="edWhoH">夫</button>
+        <button type="button" data-who="w" id="edWhoW">妻</button>
+      </div>
+    </div>
+    <button class="primary" id="edSave">保存する</button>
+    <button class="link" id="edDelete" style="display:block;margin:14px auto 6px;color:#e14b4b">この記録を削除</button>
+    <button class="link" id="edCancel" style="display:block;margin:0 auto">キャンセル</button>
+  </div>
+</div>
+
 <nav>
   <button data-tab="add" class="on"><span class="ic">＋</span>記録</button>
   <button data-tab="list"><span class="ic">📋</span>履歴</button>
@@ -331,10 +354,11 @@ function renderList(){
         <option value="0.5" ${o2}>折半（1/2ずつ）</option>
         <option value="-1" ${o3}>あとで配分を決める</option>
       </select></div>
-      <div class="amt">${yen(r.amount)}</div><button class="del" data-id="${r.id}">✕</button></div>`;
+      <div class="amt">${yen(r.amount)}</div><button class="edit" data-id="${r.id}">✎</button><button class="del" data-id="${r.id}">✕</button></div>`;
   }).join('');
 }
 $('listCard').addEventListener('click',async e=>{
+  const ed=e.target.closest('.edit');if(ed){openEdit(ed.dataset.id);return;}
   const b=e.target.closest('.del');if(!b)return;
   if(confirm('この記録を削除しますか？')){try{await apiPost({action:'delete',id:b.dataset.id});}catch(err){flash('削除に失敗しました',true);}}
 });
@@ -342,18 +366,43 @@ $('listCard').addEventListener('change',async e=>{
   const s=e.target.closest('.ratiosel');if(!s)return;
   await updateRatio(s.dataset.id, parseFloat(s.value));
 });
-/* 配分の変更＝新しい配分で追加してから古い記録を削除（サーバー側の変更は不要） */
-async function updateRatio(id,newRatio){
+/* 記録の変更＝新しい内容で追加してから古い記録を削除（サーバー側の変更は不要） */
+async function updateRecord(id,changes){
   const r=records.find(x=>String(x.id)===String(id));
   if(!r)return;
-  if(Number(r.ratio)===newRatio)return;
-  const newRec={id:Date.now(),amount:r.amount,who:r.who,ratio:newRatio,date:r.date,memo:r.memo||'',thumb:r.thumb||''};
-  try{
-    await apiPost({action:'add',record:newRec});
-    await apiPost({action:'delete',id:id});
-    flash('配分を変更しました');
-  }catch(e){flash('変更に失敗しました',true);}
+  const base={amount:r.amount,who:r.who,ratio:r.ratio,date:r.date,memo:r.memo||'',thumb:r.thumb||''};
+  const newRec=Object.assign({id:Date.now()},base,changes);
+  await apiPost({action:'add',record:newRec});
+  await apiPost({action:'delete',id:id});
 }
+async function updateRatio(id,newRatio){
+  const r=records.find(x=>String(x.id)===String(id));
+  if(!r||Number(r.ratio)===newRatio)return;
+  try{await updateRecord(id,{ratio:newRatio});flash('配分を変更しました');}catch(e){flash('変更に失敗しました',true);}
+}
+/* --- 編集モーダル（メモ・日付・支払った人） --- */
+let currentEditId=null, edWho='h';
+function updateEdWho(){[...$('edWho').children].forEach(x=>x.classList.toggle('on',x.dataset.who===edWho));}
+function openEdit(id){
+  const r=records.find(x=>String(x.id)===String(id));if(!r)return;
+  currentEditId=id;
+  $('edWhoH').textContent=names.h;$('edWhoW').textContent=names.w;
+  $('edMemo').value=r.memo||'';$('edDate').value=r.date;edWho=r.who;updateEdWho();
+  $('editModal').classList.remove('hidden');
+}
+$('edWho').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;edWho=b.dataset.who;updateEdWho();});
+$('edCancel').onclick=()=>{$('editModal').classList.add('hidden');currentEditId=null;};
+$('edSave').onclick=async()=>{
+  if(!currentEditId)return;
+  const memo=$('edMemo').value.trim(),date=$('edDate').value;
+  if(!date){flash('日付を入れてください',true);return;}
+  const id=currentEditId;$('editModal').classList.add('hidden');currentEditId=null;
+  try{await updateRecord(id,{memo,date,who:edWho});flash('変更しました');}catch(e){flash('変更に失敗しました',true);}
+};
+$('edDelete').onclick=async()=>{
+  if(!currentEditId)return;
+  if(confirm('この記録を削除しますか？')){const id=currentEditId;$('editModal').classList.add('hidden');currentEditId=null;try{await apiPost({action:'delete',id});}catch(e){flash('削除に失敗しました',true);}}
+};
 $('listPrev').onclick=()=>{listMonth=shiftMonth(listMonth,-1);renderList();};
 $('listNext').onclick=()=>{listMonth=shiftMonth(listMonth,1);renderList();};
 
