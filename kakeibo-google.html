@@ -54,6 +54,8 @@
   .item .amt{font-size:16px;font-weight:800;white-space:nowrap}
   .del{background:none;border:none;color:#c9ced8;font-size:20px;cursor:pointer;padding:4px}
   .empty{text-align:center;color:var(--sub);padding:30px 10px;font-size:14px}
+  .ratiosel{margin-top:7px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#fbfcfe;color:var(--text);max-width:190px;font-family:inherit}
+  .pending-note{background:#fff6e8;border:1px solid #f3d59b;color:#96631a;border-radius:12px;padding:12px 14px;font-size:12.5px;line-height:1.6;margin-top:12px}
   .totrow{display:flex;justify-content:space-between;padding:10px 2px;font-size:15px;border-bottom:1px dashed var(--line)}
   .totrow .v{font-weight:800}
   .settle-box{margin-top:14px;background:linear-gradient(120deg,#eaf1ff,#f3eeff);border-radius:14px;padding:18px;text-align:center}
@@ -142,8 +144,8 @@
   <div class="card">
     <h2>レシートを記録</h2>
     <div class="row">
-      <label class="photo-btn" for="photo">📷 レシートの写真を撮る / 選ぶ</label>
-      <input id="photo" type="file" accept="image/*" capture="environment" class="hidden">
+      <label class="photo-btn" for="photo">📷 撮影 / 写真・ファイルから選ぶ</label>
+      <input id="photo" type="file" accept="image/*" class="hidden">
       <div class="thumb" id="thumb"></div>
       <div class="ocr-status" id="ocrStatus"></div>
       <div class="chips" id="chips"></div>
@@ -164,6 +166,7 @@
       <div class="seg" id="segRatio">
         <button type="button" data-ratio="0.66666667" class="on">夫 2/3<small>妻 1/3</small></button>
         <button type="button" data-ratio="0.5">夫 1/2<small>妻 1/2</small></button>
+        <button type="button" data-ratio="-1">あとで<small>配分を決める</small></button>
       </div>
     </div>
     <div class="row">
@@ -190,8 +193,8 @@
   <div class="card"><h2>この月の精算</h2><div id="settleBody"></div></div>
   <div class="card">
     <h2>設定</h2>
-    <div class="settings-row"><label class="fld" style="width:70px;margin:0">夫の名前</label><input id="nameH" type="text" placeholder="夫"></div>
-    <div class="settings-row"><label class="fld" style="width:70px;margin:0">妻の名前</label><input id="nameW" type="text" placeholder="妻"></div>
+    <div class="settings-row"><label class="fld" style="width:70px;margin:0">夫の名前</label><input id="nameH" type="text" placeholder="たかゆき"></div>
+    <div class="settings-row"><label class="fld" style="width:70px;margin:0">妻の名前</label><input id="nameW" type="text" placeholder="あやこ"></div>
     <button class="link" id="saveNamesBtn">名前を保存</button>
     <div style="margin-top:16px"><button class="link" id="changePinBtn">暗証番号を変更</button></div>
     <div style="margin-top:12px"><button class="link" id="reconfigBtn">共有の接続設定をやり直す</button></div>
@@ -215,7 +218,8 @@ const PKEY='futari_pin_v1', URLKEY='futari_gs_url_v1', ROOMKEY='futari_room_v1';
 const DEFAULT_API_URL="https://script.google.com/macros/s/AKfycbwQuPG4nvIaRYYeSr7oyWceA-pJKqgnwPtdgwX_HCuFVs2xmCB9TXuKzfyOvKTv7uhMBw/exec";
 
 /* ===================== 状態 ===================== */
-let records=[], names={h:'夫',w:'妻'};
+let records=[], names={h:'たかゆき',w:'あやこ'};
+let namesInitDone=false;
 let cur={who:'h',ratio:0.66666667,thumb:null};
 let listMonth=ym(new Date()), setMonth=ym(new Date());
 let apiUrl='', room='', pollTimer=null, busy=false, pendingSetup=false;
@@ -276,6 +280,7 @@ async function reload(){
     records=(j.records||[]).map(r=>({id:String(r.id),date:String(r.date).slice(0,10),who:r.who,ratio:Number(r.ratio),amount:Number(r.amount),memo:r.memo||'',thumb:r.thumb||''}));
     if(j.names)names=j.names;
     applyNames();setStatus('● 同期中',true);renderList();renderSettle();
+    maybeSetDefaultNames();
     if(pendingSetup){hideSetup();flash('つながりました！');pendingSetup=false;}
   }catch(e){
     setStatus('接続エラー',false);
@@ -313,10 +318,19 @@ function renderList(){
   if(!rs.length){$('listCard').innerHTML='<div class="empty">この月の記録はまだありません</div>';return;}
   $('listCard').innerHTML=rs.map(r=>{
     const nm=r.who==='h'?names.h:names.w;
-    const rlabel=r.ratio>0.5?'夫2/3・妻1/3':'折半';
+    const p=r.ratio<0;
+    const o1=(!p&&r.ratio>0.5)?'selected':'';
+    const o2=(!p&&r.ratio>=0&&r.ratio<=0.5)?'selected':'';
+    const o3=p?'selected':'';
+    const nh=esc(names.h),nw=esc(names.w);
     return `<div class="item"><div class="badge ${r.who}">${esc(nm).slice(0,2)}</div>
       <div class="info"><div class="top">${r.memo?esc(r.memo):'（メモなし）'}</div>
-      <div class="sub">${r.date.slice(5).replace('-','/')}・${rlabel}</div></div>
+      <div class="sub">${r.date.slice(5).replace('-','/')}${p?'・<span style="color:#e0900f;font-weight:700">配分あとで</span>':''}</div>
+      <select class="ratiosel" data-id="${r.id}">
+        <option value="0.66666667" ${o1}>${nh}2/3・${nw}1/3</option>
+        <option value="0.5" ${o2}>折半（1/2ずつ）</option>
+        <option value="-1" ${o3}>あとで配分を決める</option>
+      </select></div>
       <div class="amt">${yen(r.amount)}</div><button class="del" data-id="${r.id}">✕</button></div>`;
   }).join('');
 }
@@ -324,6 +338,22 @@ $('listCard').addEventListener('click',async e=>{
   const b=e.target.closest('.del');if(!b)return;
   if(confirm('この記録を削除しますか？')){try{await apiPost({action:'delete',id:b.dataset.id});}catch(err){flash('削除に失敗しました',true);}}
 });
+$('listCard').addEventListener('change',async e=>{
+  const s=e.target.closest('.ratiosel');if(!s)return;
+  await updateRatio(s.dataset.id, parseFloat(s.value));
+});
+/* 配分の変更＝新しい配分で追加してから古い記録を削除（サーバー側の変更は不要） */
+async function updateRatio(id,newRatio){
+  const r=records.find(x=>String(x.id)===String(id));
+  if(!r)return;
+  if(Number(r.ratio)===newRatio)return;
+  const newRec={id:Date.now(),amount:r.amount,who:r.who,ratio:newRatio,date:r.date,memo:r.memo||'',thumb:r.thumb||''};
+  try{
+    await apiPost({action:'add',record:newRec});
+    await apiPost({action:'delete',id:id});
+    flash('配分を変更しました');
+  }catch(e){flash('変更に失敗しました',true);}
+}
 $('listPrev').onclick=()=>{listMonth=shiftMonth(listMonth,-1);renderList();};
 $('listNext').onclick=()=>{listMonth=shiftMonth(listMonth,1);renderList();};
 
@@ -332,26 +362,40 @@ function renderSettle(){
   $('setMonth').textContent=monthLabel(setMonth);
   const rs=recordsOf(setMonth);const body=$('settleBody');
   if(!rs.length){body.innerHTML='<div class="empty">この月の記録はまだありません</div>';return;}
-  let paidH=0,paidW=0,oweH=0,oweW=0,total=0;
-  rs.forEach(r=>{total+=r.amount;if(r.who==='h')paidH+=r.amount;else paidW+=r.amount;const hs=r.amount*r.ratio;oweH+=hs;oweW+=r.amount-hs;});
+  let paidH=0,paidW=0,oweH=0,oweW=0,total=0,decidedTotal=0,pendingCount=0,pendingSum=0;
+  rs.forEach(r=>{
+    total+=r.amount;
+    if(Number(r.ratio)<0){pendingCount++;pendingSum+=r.amount;return;}
+    decidedTotal+=r.amount;
+    if(r.who==='h')paidH+=r.amount;else paidW+=r.amount;
+    const hs=r.amount*r.ratio;oweH+=hs;oweW+=r.amount-hs;
+  });
   const balH=paidH-oweH;const nh=esc(names.h),nw=esc(names.w),amt=Math.abs(balH);
+  const pendNote=pendingCount>0?`<div class="pending-note">⚠ 配分が未定の記録が ${pendingCount}件（${yen(pendingSum)}）あります。<br>「履歴」でその記録の配分を選ぶと、精算に反映されます。（下の精算額には含まれていません）</div>`:'';
   let sh;
-  if(Math.round(amt)===0){sh=`<div class="settle-box"><div class="lbl">精算</div><div class="big">✓ ちょうど</div><div class="dir">精算の必要はありません</div></div>`;}
+  if(decidedTotal===0){sh=`<div class="settle-box"><div class="lbl">精算</div><div class="big">－</div><div class="dir">配分が決まった記録がまだありません</div></div>`;}
+  else if(Math.round(amt)===0){sh=`<div class="settle-box"><div class="lbl">精算</div><div class="big">✓ ちょうど</div><div class="dir">精算の必要はありません</div></div>`;}
   else if(balH>0){sh=`<div class="settle-box"><div class="lbl">精算金額</div><div class="big">${yen(amt)}</div><div class="dir arrow-w">${nw} → ${nh} へ支払う</div><div class="mini">${nw}さんが${nh}さんに ${yen(amt)} 渡すと、この月の負担が公平になります。</div></div>`;}
   else{sh=`<div class="settle-box"><div class="lbl">精算金額</div><div class="big">${yen(amt)}</div><div class="dir arrow-h">${nh} → ${nw} へ支払う</div><div class="mini">${nh}さんが${nw}さんに ${yen(amt)} 渡すと、この月の負担が公平になります。</div></div>`;}
   body.innerHTML=`<div class="totrow"><span>今月の支出合計</span><span class="v">${yen(total)}</span></div>
     <div class="totrow"><span>${nh}が支払った額</span><span class="v" style="color:var(--husband)">${yen(paidH)}</span></div>
     <div class="totrow"><span>${nw}が支払った額</span><span class="v" style="color:var(--wife)">${yen(paidW)}</span></div>
     <div class="totrow"><span>${nh}の負担すべき額</span><span class="v">${yen(oweH)}</span></div>
-    <div class="totrow"><span>${nw}の負担すべき額</span><span class="v">${yen(oweW)}</span></div>${sh}`;
+    <div class="totrow"><span>${nw}の負担すべき額</span><span class="v">${yen(oweW)}</span></div>${pendNote}${sh}`;
 }
 $('setPrev').onclick=()=>{setMonth=shiftMonth(setMonth,-1);renderSettle();};
 $('setNext').onclick=()=>{setMonth=shiftMonth(setMonth,1);renderSettle();};
 
 /* --- 名前（共有） --- */
 function applyNames(){$('whoH').firstChild.nodeValue=names.h;$('whoW').firstChild.nodeValue=names.w;if(document.activeElement!==$('nameH'))$('nameH').value=names.h;if(document.activeElement!==$('nameW'))$('nameW').value=names.w;}
+/* 初回接続時、名前が既定の「夫／妻」のままなら「たかゆき／あやこ」に自動設定（1回だけ） */
+function maybeSetDefaultNames(){
+  if(namesInitDone)return;
+  namesInitDone=true;
+  if(names.h==='夫'&&names.w==='妻'){names={h:'たかゆき',w:'あやこ'};applyNames();renderList();renderSettle();apiPost({action:'names',names}).catch(()=>{});}
+}
 $('saveNamesBtn').onclick=async()=>{
-  names={h:($('nameH').value.trim()||'夫'),w:($('nameW').value.trim()||'妻')};applyNames();
+  names={h:($('nameH').value.trim()||'たかゆき'),w:($('nameW').value.trim()||'あやこ')};applyNames();
   try{await apiPost({action:'names',names});flash('名前を保存しました');}catch(e){flash('保存に失敗しました',true);}
 };
 $('exportBtn').onclick=()=>{const blob=new Blob([JSON.stringify({records,names},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`kakeibo_${ym(new Date())}.json`;a.click();};
